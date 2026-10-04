@@ -67,6 +67,8 @@ main { padding: 20px 28px 48px; min-width: 0; }
 .seg button { border: 0; background: none; color: var(--mute); padding: 7px 0; border-radius: 7px; cursor: pointer; transition: background .2s var(--ease), color .2s var(--ease); }
 .seg button[aria-pressed=true] { background: var(--s3); color: var(--fg); }
 .srcpane { margin-bottom: 4px; }
+.seg.mini { margin: 0; display: inline-grid; grid-template-columns: repeat(3, auto); }
+.seg.mini button { padding: 7px 14px; font-size: 13px; }
 .row { display: flex; gap: 8px; }
 .row .field { flex: 1; width: auto; }
 .field { min-width: 0; width: 100%; background: var(--s1); border: 1px solid var(--line); border-radius: 8px; padding: 8px 11px; transition: border-color .2s var(--ease); }
@@ -83,6 +85,7 @@ a.btn { text-decoration: none; display: inline-block; }
 .drop input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .small { font-size: 12px; color: var(--faint); margin: 8px 0 0; }
 #codeform { margin-top: 10px; }
+.hint-pub { color: var(--mute); }
 #status { min-height: 18px; font-size: 12px; color: var(--mute); margin: 10px 0 2px; }
 #status.err { color: var(--gap); }
 
@@ -222,6 +225,7 @@ dialog[open] { animation: slide .25s var(--ease); }
   main { padding: 18px 16px 24px; }
   .bar { gap: 8px; }
   .bar #make { display: none; }
+  .seg.mini { order: 5; width: 100%; grid-template-columns: repeat(3, 1fr); }
 
   .rec { padding: 14px 14px 6px; border-radius: 12px; }
   .rh { flex-wrap: wrap; gap: 12px; }
@@ -302,6 +306,7 @@ dialog[open] { animation: slide .25s var(--ease); }
       <input class="field" type="text" id="user" placeholder="Discogs-Benutzername" aria-label="Discogs-Benutzername" autocomplete="username" spellcheck="false">
       <button class="btn" id="load" type="submit">Laden</button>
     </form>
+    <p class="small hint-pub">Die Sammlung muss auf Discogs öffentlich sein, damit das Tool darauf zugreifen kann.</p>
   </div>
   <div class="srcpane" data-src="csv" hidden>
     <label class="drop" data-kind="csv">
@@ -339,6 +344,11 @@ dialog[open] { animation: slide .25s var(--ease); }
 <main>
   <div class="bar">
     <h2 class="eyebrow">Labels prüfen</h2><span id="selcount"></span><span class="sp"></span>
+    <div class="seg mini" role="group" aria-label="Label-Design" id="stylesel">
+      <button type="button" data-style="classic" aria-pressed="false">Klassik</button>
+      <button type="button" data-style="light" aria-pressed="false">Hell</button>
+      <button type="button" data-style="dark" aria-pressed="false">Dunkel</button>
+    </div>
     <button class="btn ghost" id="fillall" type="button" disabled>Alle Lücken suchen</button>
     <button class="btn" id="make" type="button" disabled>Labels erstellen</button>
   </div>
@@ -944,7 +954,7 @@ function fitText(doc, text, maxW) {
   return text.trimEnd() + "…";
 }
 
-function drawLabel(doc, ox, oy, lab, created, warn) {
+function drawClassic(doc, ox, oy, lab, created, warn) {
   const { rec, idx, total, sides } = lab;
   const X = d => ox + d, Y = d => oy + d;
   doc.setTextColor(0);
@@ -975,8 +985,176 @@ function drawLabel(doc, ox, oy, lab, created, warn) {
   });
 }
 
-function cropMarks(doc, pageRows) {
-  doc.setDrawColor(0); doc.setLineWidth(L.CUT_W_PT * PT);
+
+/* ===== Alternative Label-Designs (gleiche Größe, gleicher Inhalt) ===== */
+const GREY = 115;
+function sideRows(lab, warn) {
+  return lab.sides.map(([side, tracks]) => {
+    if (tracks.length > L.SLOTS) warn?.(`${lab.rec.artist} – ${lab.rec.album}: Seite ${side} hat ${tracks.length} Tracks, gedruckt werden die ersten ${L.SLOTS}.`);
+    return [side, tracks.slice(0, L.SLOTS)];
+  });
+}
+function circles(doc, xRight, yMid, d = 2.0, pitch = 2.55, color = 0) {
+  doc.setDrawColor(color); doc.setLineWidth(0.25 * PT);
+  for (let k = 0; k < 5; k++) doc.circle(xRight - d / 2 - (4 - k) * pitch, yMid, d / 2, "S");
+}
+function cross(doc, x, y, s = 0.8) {
+  doc.setLineWidth(0.25 * PT); doc.line(x - s, y, x + s, y); doc.line(x, y - s, x, y + s);
+}
+function micro(doc, label, value, x, y, w, color = 0, vcolor = GREY) {
+  doc.setFont("Heros", "bold"); doc.setFontSize(5.5); doc.setTextColor(color);
+  doc.text(label.toUpperCase(), x, y);
+  doc.setFont("Heros", "normal"); doc.setFontSize(6.8); doc.setTextColor(vcolor);
+  doc.text(fitText(doc, value || "–", w), x, y + 2.7);
+}
+/** Trackzeilen im neuen Stil (Raster & Kontrast). */
+function trackBlock(doc, X, Y, rows, top, pitch, sideGap, headY) {
+  doc.setFont("Heros", "normal"); doc.setFontSize(5.5); doc.setTextColor(GREY);
+  doc.text("NR.", X(3), Y(headY)); doc.text("TITEL", X(11.5), Y(headY));
+  doc.text("DAUER", X(60), Y(headY), { align: "right" });
+  doc.text("KEY", X(63.5), Y(headY)); doc.text("BPM", X(72), Y(headY));
+  doc.text("RATING", X(98), Y(headY), { align: "right" });
+  doc.setDrawColor(0); doc.setLineWidth(0.25 * PT); doc.line(X(3), Y(headY + 1.3), X(98), Y(headY + 1.3));
+  rows.forEach(([side, tracks], si) => {
+    const y0 = top + si * (L.SLOTS * pitch + sideGap);
+    if (si) { doc.setDrawColor(190); doc.setLineWidth(0.25 * PT); doc.line(X(3), Y(y0 - sideGap / 2 - 1.4), X(98), Y(y0 - sideGap / 2 - 1.4)); }
+    tracks.forEach((t, n) => {
+      const y = y0 + n * pitch;
+      doc.setFont("Heros", "normal"); doc.setFontSize(7); doc.setTextColor(GREY);
+      doc.text(t.label, X(3), Y(y));
+      doc.setFont("Heros", "bold"); doc.setFontSize(7.5); doc.setTextColor(0);
+      doc.text(fitText(doc, t.title, 41.5), X(11.5), Y(y));
+      doc.setFont("Heros", "normal");
+      doc.text(t.dur || "–", X(60), Y(y), { align: "right" });
+      doc.text(toCamelot(t.key) || "–", X(63.5), Y(y));
+      doc.text(fixBpm(t.bpm) || "–", X(72), Y(y));
+      circles(doc, X(98), Y(y - 0.95));
+    });
+  });
+}
+
+/* Raster: geteilte Kopfzeile wie ein Wortbild, Mikro-Labels, feine Linien */
+function drawRaster(doc, ox, oy, lab, created, warn) {
+  const { rec, idx, total } = lab, X = d => ox + d, Y = d => oy + d;
+  doc.setDrawColor(0); doc.setTextColor(0);
+  cross(doc, X(48.3), Y(4.0)); cross(doc, X(97.2), Y(4.0));
+  doc.setFont("Heros", "bold"); doc.setFontSize(12.5);
+  doc.text(fitText(doc, rec.album, 43), X(3), Y(9.4));
+  doc.text(`Label ${idx}/${total}`, X(50.5), Y(9.4));
+  doc.setLineWidth(0.3 * PT); doc.line(X(3), Y(11.6), X(98), Y(11.6));
+  micro(doc, "Interpret", rec.artist, X(3), Y(14.9), 21);
+  micro(doc, "Genre", rec.genre, X(25.5), Y(14.9), 23.5);
+  micro(doc, "Jahr", rec.year, X(51.5), Y(14.9), 32);
+  micro(doc, "Erstellt", created, X(85), Y(14.9), 13.5);
+  trackBlock(doc, X, Y, sideRows(lab, warn), 27.4, 4.1, 4.1, 22.3);
+}
+
+/* Monogramm: großer Seitenbuchstabe neben jeder Plattenseite */
+function drawMono(doc, ox, oy, lab, created, warn) {
+  const { rec, idx, total } = lab, X = d => ox + d, Y = d => oy + d;
+  doc.setTextColor(0);
+  doc.setFont("Heros", "bold"); doc.setFontSize(9.5);
+  doc.text(fitText(doc, rec.album, 34), X(3), Y(6.4));
+  doc.text(`Label ${idx}/${total}`, X(98), Y(6.4), { align: "right" });
+  doc.setFont("Heros", "normal"); doc.setFontSize(8);
+  doc.text(fitText(doc, rec.artist, 34), X(3), Y(9.8));
+  doc.text(created, X(98), Y(9.8), { align: "right" });
+  doc.setTextColor(GREY);
+  doc.text(fitText(doc, rec.genre, 32), X(40), Y(6.4));
+  doc.text(fitText(doc, rec.year, 32), X(40), Y(9.8));
+  doc.setDrawColor(0); doc.setLineWidth(0.6 * PT); doc.line(X(3), Y(13.2), X(98), Y(13.2));
+  sideRows(lab, warn).forEach(([side, tracks], si) => {
+    const y0 = 17.6 + si * 27.2;
+    doc.setFont("Heros", "bold"); doc.setFontSize(36); doc.setTextColor(0);
+    doc.text(side, X(2.4), Y(y0 + 10.2));
+    if (si) { doc.setDrawColor(190); doc.setLineWidth(0.25 * PT); doc.line(X(15), Y(y0 - 3.0), X(98), Y(y0 - 3.0)); }
+    tracks.forEach((t, n) => {
+      const y = y0 + 1.6 + n * 4.25;
+      const num = (t.label.split("/")[1] || t.label);
+      doc.setFont("Heros", "normal"); doc.setFontSize(7.5); doc.setTextColor(GREY);
+      doc.text(num, X(15.5), Y(y));
+      doc.setFont("Heros", "bold"); doc.setTextColor(0);
+      doc.text(fitText(doc, t.title, 32), X(21), Y(y));
+      doc.setFont("Heros", "normal");
+      doc.text(t.dur || "–", X(60), Y(y), { align: "right" });
+      doc.text(toCamelot(t.key) || "–", X(63.5), Y(y));
+      doc.text(fixBpm(t.bpm) || "–", X(72), Y(y));
+      circles(doc, X(98), Y(y - 0.95));
+    });
+  });
+}
+
+/* Kontrast: dunkler Kopf wie die Website, darunter helle Trackliste */
+function drawContrast(doc, ox, oy, lab, created, warn) {
+  const { rec, idx, total } = lab, X = d => ox + d, Y = d => oy + d;
+  doc.setFillColor(14, 14, 14); doc.roundedRect(X(2.5), Y(2.5), 96, 17.2, 2.2, 2.2, "F");
+  doc.setTextColor(240); doc.setFont("Heros", "bold"); doc.setFontSize(11.5);
+  doc.text(fitText(doc, rec.album, 60), X(5.5), Y(8.9));
+  doc.setFontSize(8); doc.text(`Label ${idx}/${total}`, X(95.5), Y(8.9), { align: "right" });
+  doc.setFont("Heros", "normal"); doc.setFontSize(8); doc.setTextColor(200);
+  doc.text(fitText(doc, rec.artist, 60), X(5.5), Y(12.6));
+  doc.text(created, X(95.5), Y(12.6), { align: "right" });
+  doc.setFontSize(6.5); doc.setTextColor(150);
+  doc.text(fitText(doc, rec.genre, 38), X(5.5), Y(16.9));
+  doc.text(fitText(doc, rec.year, 38), X(46), Y(16.9));
+  doc.setDrawColor(240); cross(doc, X(95.5), Y(16.4), 0.7);
+  trackBlock(doc, X, Y, sideRows(lab, warn), 28.9, 4.1, 4.0, 24.0);
+}
+
+/* Monogramm × Kontrast – hell und dunkel */
+const THEMES = {
+  light: { bg: null, card: 14, title: 240, sub: 200, meta: 150, letter: 0, num: GREY, text: 0, ring: 0, rule: 190, cut: 0 },
+  dark:  { bg: 18, card: 46, title: 245, sub: 205, meta: 150, letter: 245, num: 140, text: 235, ring: 200, rule: 75, cut: 150 },
+};
+function drawMonoTheme(doc, ox, oy, lab, created, warn, th) {
+  const { rec, idx, total } = lab, X = d => ox + d, Y = d => oy + d;
+  if (th.bg != null) { doc.setFillColor(th.bg, th.bg, th.bg); doc.rect(ox, oy, L.LW, L.LH, "F"); }
+  doc.setFillColor(th.card, th.card, th.card); doc.roundedRect(X(2.5), Y(2.5), 96, 17.2, 2.2, 2.2, "F");
+  doc.setTextColor(th.title); doc.setFont("Heros", "bold"); doc.setFontSize(11.5);
+  doc.text(fitText(doc, rec.album, 60), X(5.5), Y(8.9));
+  doc.setFontSize(8); doc.text(`Label ${idx}/${total}`, X(95.5), Y(8.9), { align: "right" });
+  doc.setFont("Heros", "normal"); doc.setFontSize(8); doc.setTextColor(th.sub);
+  doc.text(fitText(doc, rec.artist, 60), X(5.5), Y(12.6));
+  doc.text(created, X(95.5), Y(12.6), { align: "right" });
+  doc.setFontSize(6.5); doc.setTextColor(th.meta);
+  doc.text(fitText(doc, rec.genre, 38), X(5.5), Y(16.9));
+  doc.text(fitText(doc, rec.year, 38), X(46), Y(16.9));
+  doc.setDrawColor(th.title); cross(doc, X(95.5), Y(16.4), 0.7);
+  sideRows(lab, warn).forEach(([side, tracks], si) => {
+    const y0 = 24.6 + si * 23.4;
+    doc.setFont("Heros", "bold"); doc.setFontSize(32); doc.setTextColor(th.letter);
+    doc.text(side, X(3.2), Y(y0 + 9.6));
+    if (si) { doc.setDrawColor(th.rule); doc.setLineWidth(0.25 * PT); doc.line(X(15), Y(y0 - 2.6), X(98), Y(y0 - 2.6)); }
+    tracks.forEach((t, n) => {
+      const y = y0 + 1.6 + n * 4.15;
+      const num = (t.label.split("/")[1] || t.label);
+      doc.setFont("Heros", "normal"); doc.setFontSize(7.5); doc.setTextColor(th.num);
+      doc.text(num, X(15.5), Y(y));
+      doc.setFont("Heros", "bold"); doc.setTextColor(th.text);
+      doc.text(fitText(doc, t.title, 32), X(21), Y(y));
+      doc.setFont("Heros", "normal");
+      doc.text(t.dur || "–", X(60), Y(y), { align: "right" });
+      doc.text(toCamelot(t.key) || "–", X(63.5), Y(y));
+      doc.text(fixBpm(t.bpm) || "–", X(72), Y(y));
+      circles(doc, X(98), Y(y - 0.95), 2.0, 2.55, th.ring);
+    });
+  });
+}
+
+const STYLES = {
+  classic: { name: "Klassik", draw: drawClassic },
+  raster: { name: "Raster", draw: drawRaster },
+  mono: { name: "Monogramm", draw: drawMono },
+  contrast: { name: "Kontrast", draw: drawContrast },
+  light: { name: "Hell", draw: (d, x, y, l, c, w) => drawMonoTheme(d, x, y, l, c, w, THEMES.light) },
+  dark: { name: "Dunkel", cut: 150, draw: (d, x, y, l, c, w) => drawMonoTheme(d, x, y, l, c, w, THEMES.dark) },
+};
+function drawLabel(doc, ox, oy, lab, created, warn, style = "classic") {
+  (STYLES[style] || STYLES.classic).draw(doc, ox, oy, lab, created, warn);
+}
+
+function cropMarks(doc, pageRows, color = 0) {
+  doc.setDrawColor(color); doc.setLineWidth(L.CUT_W_PT * PT);
   const left = L.MARGIN, right = L.MARGIN + L.COLS * L.LW, top = L.MARGIN, bottom = L.MARGIN + L.ROWS * L.LH, c = L.CUT_LEN;
   [left, right].forEach(x => { doc.line(x, top, x, top + c); doc.line(x, bottom, x, bottom - c); });
   for (let j = 0; j <= L.ROWS; j++) {
@@ -1001,7 +1179,7 @@ function registerFonts(doc) {
 }
 
 /** records -> jsPDF-Dokument. Rückgabe: { doc, labels, pages, warnings } */
-function buildPdf(records, created) {
+function buildPdf(records, created, style = "classic") {
   const { jsPDF } = (typeof window !== "undefined" ? window : globalThis).jspdf;
   const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
   registerFonts(doc);
@@ -1013,10 +1191,10 @@ function buildPdf(records, created) {
     if (p) doc.addPage();
     const pageRows = rows.slice(p, p + L.ROWS);
     pageRows.forEach((labels, r) => labels.forEach((lab, col) => {
-      drawLabel(doc, L.MARGIN + col * L.LW, L.MARGIN + r * L.LH, lab, created, w => warnings.push(w));
+      drawLabel(doc, L.MARGIN + col * L.LW, L.MARGIN + r * L.LH, lab, created, w => warnings.push(w), style);
       n++;
     }));
-    cropMarks(doc, pageRows);
+    cropMarks(doc, pageRows, (STYLES[style] || {}).cut || 0);
   }
   return { doc, labels: n, pages: Math.ceil(rows.length / L.ROWS), warnings };
 }
@@ -1025,7 +1203,7 @@ function todayDE(d = new Date()) {
   return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
 }
 
-if (typeof module !== "undefined") module.exports = { L, trackNumbers, toCamelot, fixBpm, normalizeRelease, splitLabels, arrangeRows, buildPdf, todayDE };
+if (typeof module !== "undefined") module.exports = { L, STYLES, drawLabel, registerFonts, cropMarks, trackNumbers, toCamelot, fixBpm, normalizeRelease, splitLabels, arrangeRows, buildPdf, todayDE };
 </script>
 <script>/* ===== Vinyl Label – Oberfläche & Datenquellen ===== */
 const LS = "vc1:";
@@ -1046,7 +1224,7 @@ const store = {
 };
 
 const state = {
-  settings: store.get("settings", { user: "", token: "", gsb: "" }),
+  settings: { style: "classic", ...store.get("settings", { user: "", token: "", gsb: "" }) },
   collection: [],          // Discogs oder CSV
   manual: [],              // per Foto / Barcode hinzugefügt
   selected: [],            // IDs (String) in Auswahl-Reihenfolge
@@ -1582,21 +1760,28 @@ async function makePdf() {
   await queue;                                         // laufende Ladevorgänge abwarten
   await fillSelected(false, btn, "Prüfe Lücken");       // vor jedem PDF: nur leere Felder nachsuchen
   btn.textContent = "Labels erstellen"; btn.disabled = false;
+  renderPdf(true);
+}
+function renderPdf(scroll) {
   const recs = state.selected.map(getRec).filter(Boolean);
   if (!recs.length) return;
-  const { doc, labels, pages, warnings } = buildPdf(recs, todayDE());
+  const style = state.settings.style || "classic";
+  const { doc, labels, pages, warnings } = buildPdf(recs, todayDE(), style);
   if (state.pdfUrl) URL.revokeObjectURL(state.pdfUrl);
   state.pdfUrl = URL.createObjectURL(doc.output("blob"));
   const open = recs.reduce((s, r) => s + gapCount(r), 0);
   $("#out").hidden = false;
   $("#frame").src = state.pdfUrl;
   $("#download").href = state.pdfUrl;
+  $("#download").download = `VinylLabel_${STYLES[style]?.name || "Klassik"}_${todayDE().split(".").reverse().join("-")}.pdf`;
   $("#openpdf").href = state.pdfUrl;
-  setView("edit");
-  $("#download").download = `VinylLabels_${todayDE().split(".").reverse().join("-")}.pdf`;
-  $("#outinfo").textContent = `${labels} Labels auf ${pages} ${pages === 1 ? "Bogen" : "Bögen"}. In Originalgröße (100 %) drucken.`
+  $("#outinfo").textContent = `${labels} Labels auf ${pages} ${pages === 1 ? "Bogen" : "Bögen"}, Design „${STYLES[style]?.name || "Klassik"}“. In Originalgröße (100 %) drucken.`
+    + (style === "dark" ? " Das dunkle Design braucht viel schwarze Tinte." : "")
     + (open ? ` ${open} Tracks haben noch Lücken (–).` : "") + (warnings.length ? " " + warnings.join(" ") : "");
-  requestAnimationFrame(() => $("#out").scrollIntoView({ behavior: isMobile() || matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }));
+  if (scroll) {
+    setView("edit");
+    requestAnimationFrame(() => $("#out").scrollIntoView({ behavior: isMobile() || matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }));
+  }
 }
 function markPrinted() {
   const p = getPrinted(), d = todayDE();
@@ -1736,6 +1921,12 @@ function init() {
   });
   $("#make").addEventListener("click", makePdf);
   $("#make-m").addEventListener("click", makePdf);
+  const showStyle = () => $$("#stylesel button").forEach(b => b.setAttribute("aria-pressed", b.dataset.style === (state.settings.style || "classic")));
+  $$("#stylesel button").forEach(b => b.addEventListener("click", () => {
+    saveSettings({ style: b.dataset.style }); showStyle();
+    if (!$("#out").hidden) renderPdf(false);           // offener Druckbogen wird sofort neu gezeichnet
+  }));
+  showStyle();
   $$(".tabbar [data-view]").forEach(b => b.addEventListener("click", () => setView(b.dataset.view)));
   setView("list");
   $("#markprinted").addEventListener("click", markPrinted);
