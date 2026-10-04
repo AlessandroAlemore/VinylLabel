@@ -149,9 +149,9 @@ input::placeholder { color: #a8a8a8; font-weight: 400; }
     <input type="password" id="token" placeholder="Persönlicher Token (optional)" autocomplete="off">
   </details>
   <details>
-    <summary>Tonart und BPM automatisch suchen</summary>
-    <p>Dafür brauchst du einen kostenlosen API-Key von <a href="https://getsongbpm.com/api" target="_blank" rel="noopener">GetSongBPM</a>. Ist er eingetragen, sucht das Tool beim Laden jeder Platte die fehlenden Werte. Was nicht gefunden wird, ergänzt du in der Tabelle.</p>
-    <input type="password" id="gsb" placeholder="GetSongBPM-API-Key (optional)" autocomplete="off">
+    <summary>Eigener Key für Tonart und BPM</summary>
+    <p>Tonart und BPM werden automatisch über <a href="https://getsongbpm.com/api" target="_blank" rel="noopener">GetSongBPM</a> gesucht, ein Key ist schon eingebaut. Ein eigener Key ist nur nötig, wenn die Suche wegen des gemeinsamen Kontingents pausiert.</p>
+    <input type="password" id="gsb" placeholder="Eigener GetSongBPM-Key (optional)" autocomplete="off">
   </details>
   <p id="status" role="status"></p>
 
@@ -820,6 +820,8 @@ if (typeof module !== "undefined") module.exports = { L, toCamelot, fixBpm, norm
 <script>/* ===== Vinyl Crates – Oberfläche & Discogs ===== */
 const API = "https://api.discogs.com";
 const LS = "vc1:";
+const DEFAULT_GSB = "0ea31572f5dce07f679b283482841133";   // eingebauter GetSongBPM-Key
+const gsbKey = () => state.settings.gsb || DEFAULT_GSB;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 
@@ -897,7 +899,7 @@ async function fetchDetails(id) {
   if (master?.tracklist) fillFrom(rec, master.tracklist.map(t => ({ title: t.title, dur: t.duration })), "dur");
   if (rec.tracks.some(t => !t.dur)) { try { await durationsFromMusicBrainz(rec); } catch {} }
   setRec(id, rec);
-  if (state.settings.gsb) { try { await lookupKeys(rec); setRec(id, rec); } catch (e) { status(e.message, true); } }
+  if (gsbKey()) { try { await lookupKeys(rec); setRec(id, rec); } catch (e) { status(e.message, true); } }
   return rec;
 }
 
@@ -944,7 +946,7 @@ async function durationsFromMusicBrainz(rec) {
 /* ---- GetSongBPM (Tonart & BPM) – kostenloser API-Key nötig ---- */
 let gsbLast = 0;
 async function lookupKeys(rec, force) {
-  const key = state.settings.gsb; if (!key) return 0;
+  const key = gsbKey(); if (!key) return 0;
   const artist = rec.artist.split(/ & |, | and /)[0];
   let n = 0;
   for (const t of rec.tracks) {
@@ -956,7 +958,7 @@ async function lookupKeys(rec, force) {
     let data;
     try {
       const res = await fetch(`https://api.getsong.co/search/?api_key=${encodeURIComponent(key)}&type=both&lookup=${encodeURIComponent(lookup)}`);
-      if (res.status === 401 || res.status === 403) throw new Error("GetSongBPM lehnt den API-Key ab. Bitte in den Einstellungen prüfen.");
+      if (res.status === 401 || res.status === 403) throw new Error("GetSongBPM lehnt den API-Key ab. Ist ein eigener Key eingetragen, bitte prüfen – sonst muss der eingebaute Key erneuert werden.");
       if (!res.ok) throw new Error(`GetSongBPM antwortet mit Fehler ${res.status}.`);
       data = await res.json();
     } catch (e) {
@@ -1091,8 +1093,7 @@ async function fillGaps(id, btn) {
   btn.disabled = true; btn.textContent = "suche …";
   try {
     if (rec.tracks.some(t => !t.dur)) await durationsFromMusicBrainz(rec);
-    if (state.settings.gsb) await lookupKeys(rec);
-    else toast("Für Tonart und BPM einen GetSongBPM-API-Key in den Einstellungen eintragen.", true);
+    await lookupKeys(rec);
     setRec(id, rec);
     const left = rec.tracks.filter(t => !t.dur || !toCamelot(t.key) || !fixBpm(t.bpm)).length;
     toast(left ? `${left} Tracks haben noch Lücken – bitte von Hand ergänzen.` : "Alle Werte gefunden.", !!left);
