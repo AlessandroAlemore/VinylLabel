@@ -2,7 +2,8 @@
 <html lang="de">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e0e0e">
 <meta name="color-scheme" content="dark">
 <title>Vinyl Label – Labels für deine Platten</title>
 <style>
@@ -192,19 +193,81 @@ dialog[open] { animation: slide .25s var(--ease); }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 #toast.err { color: var(--gap); }
 
+.tabbar, #openpdf { display: none; }
+
+/* ===== Handy ===== */
 @media (max-width: 860px) {
-  .mast, .foot { grid-template-columns: 1fr 1fr; padding: 18px 16px 0; }
-  .metas.r, .word.r { padding-left: 16px; }
-  .metas { gap: 0 16px; }
-  .wrap { grid-template-columns: 1fr; }
-  aside { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 16px; }
-  .listbox { max-height: 55vh; flex: none; }
-  main { padding: 16px; }
-  .head { grid-template-columns: 1fr; }
+  html, body { font-size: 15px; }
+  body { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+  input.field, td input, .head input { font-size: 16px; }          /* verhindert Zoom unter iOS */
+
+  .mast, .foot { grid-template-columns: 1fr 1fr; padding: calc(14px + env(safe-area-inset-top)) 16px 0; }
+  .word span { font-size: clamp(34px, 11.5vw, 60px); }
+  .word.r, .metas.r { padding-left: 12px; }
+  .word i { right: 4px; font-size: 13px; }
+  .metas { gap: 10px 14px; padding: 12px 0 16px; }
+  .metas p { min-width: 0; }
+  .metas.r p:nth-of-type(2) { display: none; }
+  .metas .sp { display: none; }
+  .foot { padding-top: 28px; margin-top: 0; }
+  .foot .word.sm span { font-size: clamp(36px, 12vw, 56px); }
+
+  .wrap { grid-template-columns: 1fr; min-height: 0; }
+  body[data-view=edit] aside, body[data-view=list] main, body[data-view=list] #out { display: none; }
+  aside { position: static; height: auto; border-right: 0; padding: 18px 16px 8px; }
+  .listbox { flex: none; overflow: visible; mask-image: none; margin: 0 -6px; }
+  #list label { padding: 10px 6px; grid-template-columns: auto 44px 1fr auto; }
+  .cov { width: 44px; height: 44px; }
+  .drop { min-height: 120px; }
+  main { padding: 18px 16px 24px; }
+  .bar { gap: 8px; }
+  .bar #make { display: none; }
+
+  .rec { padding: 14px 14px 6px; border-radius: 12px; }
+  .rh { flex-wrap: wrap; gap: 12px; }
+  .cov.big { width: 56px; height: 56px; }
+  .head { grid-template-columns: 1fr; flex: 1 1 calc(100% - 70px); }
+  .head input[data-f=album] { font-size: 18px; }
+  .head input[data-f=genre] { order: 3; }
+  .head input[data-f=artist] { order: 2; }
+  .head input[data-f=year] { order: 4; }
+  .acts { flex-direction: row; align-items: center; gap: 14px; width: 100%; }
   .meta, .note, .warn { margin-left: 0; }
-  #out { padding: 16px; }
-  .sheet { height: 80vh; }
-  .del { opacity: 1; }
+
+  /* Tracks als zweizeilige Karten statt Tabelle */
+  table, tbody { display: block; }
+  thead { display: none; }
+  tr { display: grid; grid-template-columns: 3.3em 1fr 1fr 0.8fr 1fr 2.2em; column-gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--s2); }
+  tr:last-child { border-bottom: 0; }
+  td { border: 0; padding: 0; min-width: 0; }
+  td.pos { grid-column: 1; grid-row: 1; width: auto; }
+  tr > td:nth-child(2) { grid-column: 2 / 6; grid-row: 1; width: auto; }
+  td.act { grid-column: 6; grid-row: 1; text-align: right; }
+  td[data-l] { grid-row: 2; }
+  td[data-l]::before { content: attr(data-l); display: block; font-size: 10px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
+  td[data-l=Dauer] { grid-column: 2; } td[data-l=Tonart] { grid-column: 3; } td[data-l=Key] { grid-column: 4; } td[data-l=BPM] { grid-column: 5; }
+  td input { padding: 2px 0; }
+  td input[data-t=dur], td input[data-t=bpm], td input[data-t=key] { width: 100%; }
+  td.cam { width: auto; font-size: 15px; padding-top: 2px; }
+  td.cam:empty::after { content: "–"; color: var(--faint); }
+  .del { opacity: 1; font-size: 20px; padding: 4px 6px; }
+
+  #out { padding: 18px 16px 24px; }
+  .sheet { display: none; }
+  #openpdf { display: inline-block; }
+  #out .bar { flex-wrap: wrap; }
+
+  dialog { width: 100%; max-width: none; margin: 0; border-left: 0; }
+  .set { padding: calc(18px + env(safe-area-inset-top)) 18px 40px; }
+
+  .tabbar { display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: 6px; position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); background: rgba(14,14,14,.86); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-top: 1px solid var(--line); }
+  .tabbar button { border: 0; background: none; color: var(--mute); border-radius: 10px; padding: 12px 6px; cursor: pointer; font-size: 14px; }
+  .tabbar button[aria-pressed=true] { background: var(--s2); color: var(--fg); }
+  .tabbar .btn { color: var(--bg); background: var(--fg); font-weight: 700; }
+  .tabbar .btn:disabled { opacity: .3; }
+  #tab-count { color: var(--new); }
+  #toast { bottom: calc(86px + env(safe-area-inset-bottom)); }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
@@ -286,6 +349,7 @@ dialog[open] { animation: slide .25s var(--ease); }
 <section id="out" hidden>
   <div class="bar">
     <h2 class="eyebrow">Druckbogen</h2><span class="sp"></span>
+    <a class="btn ghost" id="openpdf" href="#" target="_blank" rel="noopener">PDF öffnen ↗</a>
     <a class="btn ghost" id="download" href="#">Herunterladen ↓</a>
     <button class="btn" id="markprinted" type="button">Als gedruckt markieren</button>
   </div>
@@ -325,6 +389,11 @@ dialog[open] { animation: slide .25s var(--ease); }
   <div class="metas l"><p><b>Daten</b><span>Discogs, MusicBrainz, ReccoBeats, Deezer</span></p></div>
   <div class="metas r"><p><b>BPM &amp; Tonart</b><span><a href="https://getsongbpm.com" target="_blank" rel="noopener">GetSongBPM.com ↗</a></span></p><span class="sp"></span><p><b>Labels</b><span>101 × 72,245 mm</span></p></div>
 </footer>
+<nav class="tabbar" aria-label="Ansicht">
+  <button type="button" data-view="list" aria-pressed="true">Sammlung</button>
+  <button type="button" data-view="edit" aria-pressed="false">Prüfen <span id="tab-count"></span></button>
+  <button type="button" class="btn" id="make-m" disabled>Labels erstellen</button>
+</nav>
 <div id="toast" role="alert"></div>
 
 <script>/** @license
@@ -1420,6 +1489,8 @@ function renderEditor() {
   const ed = $("#editor");
   $("#selcount").textContent = state.selected.length ? `${state.selected.length} ausgewählt` : "";
   $("#m-sel").textContent = String(state.selected.length);
+  $("#tab-count").textContent = state.selected.length ? String(state.selected.length) : "";
+  $("#make-m").disabled = !state.selected.some(id => getRec(id));
   $("#make").disabled = !state.selected.some(id => getRec(id));
   $("#fillall").disabled = !state.selected.some(id => getRec(id));
   if (!state.selected.length) {
@@ -1465,10 +1536,10 @@ function renderEditor() {
           return `<tr data-k="${k}">
             ${numTd}
             <td><input data-t="title" value="${esc(t.title)}"></td>
-            <td><input data-t="dur" class="${t.dur ? "" : "miss"}" value="${esc(t.dur)}" placeholder="–"></td>
-            <td><input data-t="key" class="${cam ? "" : "miss"}" value="${esc(t.key)}" placeholder="–" title="Tonart (Am, F#m, a-Moll) oder Camelot (8A)"></td>
-            <td class="cam">${cam}</td>
-            <td><input data-t="bpm" class="${bpm ? "" : "miss"}" value="${esc(t.bpm)}" inputmode="numeric" placeholder="–">${bpm && bpm !== String(Math.round(+t.bpm)) ? `<small title="Wert über ${L.BPM_MAX} wurde halbiert">${bpm}</small>` : ""}</td>
+            <td data-l="Dauer"><input data-t="dur" class="${t.dur ? "" : "miss"}" value="${esc(t.dur)}" placeholder="–"></td>
+            <td data-l="Tonart"><input data-t="key" class="${cam ? "" : "miss"}" value="${esc(t.key)}" placeholder="–" title="Tonart (Am, F#m, a-Moll) oder Camelot (8A)"></td>
+            <td class="cam" data-l="Key">${cam}</td>
+            <td data-l="BPM"><input data-t="bpm" class="${bpm ? "" : "miss"}" value="${esc(t.bpm)}" inputmode="numeric" placeholder="–">${bpm && bpm !== String(Math.round(+t.bpm)) ? `<small title="Wert über ${L.BPM_MAX} wurde halbiert">${bpm}</small>` : ""}</td>
             <td class="act"><button class="del" data-skip="${k}" title="Track nicht drucken" aria-label="${esc(t.title)} nicht drucken">×</button></td>
           </tr>`; }).join("")}</tbody>
       </table>
@@ -1507,7 +1578,7 @@ async function fillSelected(force, btn, label) {
   return ids.length;
 }
 async function makePdf() {
-  const btn = $("#make"); btn.disabled = true;
+  const btn = isMobile() ? $("#make-m") : $("#make"); btn.disabled = true;
   await queue;                                         // laufende Ladevorgänge abwarten
   await fillSelected(false, btn, "Prüfe Lücken");       // vor jedem PDF: nur leere Felder nachsuchen
   btn.textContent = "Labels erstellen"; btn.disabled = false;
@@ -1520,10 +1591,12 @@ async function makePdf() {
   $("#out").hidden = false;
   $("#frame").src = state.pdfUrl;
   $("#download").href = state.pdfUrl;
+  $("#openpdf").href = state.pdfUrl;
+  setView("edit");
   $("#download").download = `VinylLabels_${todayDE().split(".").reverse().join("-")}.pdf`;
   $("#outinfo").textContent = `${labels} Labels auf ${pages} ${pages === 1 ? "Bogen" : "Bögen"}. In Originalgröße (100 %) drucken.`
     + (open ? ` ${open} Tracks haben noch Lücken (–).` : "") + (warnings.length ? " " + warnings.join(" ") : "");
-  $("#out").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  requestAnimationFrame(() => $("#out").scrollIntoView({ behavior: isMobile() || matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }));
 }
 function markPrinted() {
   const p = getPrinted(), d = todayDE();
@@ -1577,6 +1650,12 @@ let toastT;
 function toast(msg, err) { const t = $("#toast"); t.textContent = msg; t.className = err ? "show err" : "show"; clearTimeout(toastT); toastT = setTimeout(() => t.className = "", 4500); }
 
 /* ---------- Start ---------- */
+const isMobile = () => matchMedia("(max-width: 860px)").matches;
+function setView(v) {
+  document.body.dataset.view = v;
+  $$(".tabbar [data-view]").forEach(b => b.setAttribute("aria-pressed", b.dataset.view === v));
+  if (isMobile()) window.scrollTo({ top: 0 });
+}
 function setSource(src) {
   state.source = src; store.set("source", src);
   $$(".seg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.src === src));
@@ -1656,6 +1735,9 @@ function init() {
     toast(n ? "Suche abgeschlossen." : "Keine Lücken bei den ausgewählten Platten.");
   });
   $("#make").addEventListener("click", makePdf);
+  $("#make-m").addEventListener("click", makePdf);
+  $$(".tabbar [data-view]").forEach(b => b.addEventListener("click", () => setView(b.dataset.view)));
+  setView("list");
   $("#markprinted").addEventListener("click", markPrinted);
 
   state.manual = store.get("manual:" + userKey(), []);
