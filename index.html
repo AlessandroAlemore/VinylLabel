@@ -277,7 +277,7 @@ dialog[open] { animation: slide .25s var(--ease); }
   <div class="bar">
     <h2 class="eyebrow">Labels prüfen</h2><span id="selcount"></span><span class="sp"></span>
     <button class="btn ghost" id="fillall" type="button" disabled>Alle Lücken suchen</button>
-    <button class="btn" id="make" type="button" disabled>PDF erstellen</button>
+    <button class="btn" id="make" type="button" disabled>Labels erstellen</button>
   </div>
   <div id="editor"></div>
 </main>
@@ -1426,7 +1426,7 @@ function renderEditor() {
     ed.innerHTML = `<div class="hint"><p>Wähle links Platten aus.</p><p>Tracklist, Laufzeiten, Genre und Jahr kommen von Discogs. Tonart und BPM werden automatisch gesucht. Alles lässt sich hier prüfen und ändern, deine Eingaben werden nie überschrieben.</p></div>`;
     return;
   }
-  ed.innerHTML = state.selected.map(id => {
+  ed.innerHTML = [...state.selected].reverse().map(id => {   // zuletzt ausgewählt steht oben
     const r = getRec(id);
     if (!r) return `<section class="rec loading"><div class="rh"><span class="cov big"></span><div><b>${esc(labelOf(id))}</b><p class="muted">wird geladen …</p></div></div></section>`;
     const labs = splitLabels(r), nums = trackNumbers(r);
@@ -1510,7 +1510,7 @@ async function makePdf() {
   const btn = $("#make"); btn.disabled = true;
   await queue;                                         // laufende Ladevorgänge abwarten
   await fillSelected(false, btn, "Prüfe Lücken");       // vor jedem PDF: nur leere Felder nachsuchen
-  btn.textContent = "PDF erstellen"; btn.disabled = false;
+  btn.textContent = "Labels erstellen"; btn.disabled = false;
   const recs = state.selected.map(getRec).filter(Boolean);
   if (!recs.length) return;
   const { doc, labels, pages, warnings } = buildPdf(recs, todayDE());
