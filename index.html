@@ -852,6 +852,9 @@ const L = {
   CUT_W_PT: 0.1, CUT_LEN: 4.0,
 };
 const PT = 25.4 / 72;
+const ROW_END = 66.8;   // letzte mögliche Grundlinie auf dem Label (mm von oben)
+/** Abstand für n Zeilen ab start – bei Bedarf enger, damit alles bis ROW_END passt. */
+const fitPitch = (n, start, pitch) => (n > 1 && start + (n - 1) * pitch > ROW_END) ? (ROW_END - start) / (n - 1) : pitch;
 
 /* ---- Tonart -> Camelot ---- */
 const CAMELOT = {
@@ -954,8 +957,14 @@ function splitLabels(rec) {
     if (!t.skip) bySide[s].push({ ...t, label: (t.num || "").trim() || nums[i].label });
   });
   sides.sort();
+  // Je Platte (A/B, C/D …) ein Label. Hat eine Seite mehr als 5 Tracks,
+  // bekommt jede Seite dieser Platte ein eigenes Label – eine Seite wird nie geteilt.
   const pairs = [];
-  for (let i = 0; i < sides.length; i += 2) pairs.push(sides.slice(i, i + 2).map(s => [s, bySide[s]]));
+  for (let i = 0; i < sides.length; i += 2) {
+    const disc = sides.slice(i, i + 2).map(s => [s, bySide[s]]);
+    if (disc.some(([, ts]) => ts.length > L.SLOTS)) disc.forEach(d => pairs.push([d]));
+    else pairs.push(disc);
+  }
   if (!pairs.length) pairs.push([]);
   return pairs.map((p, i) => ({ rec, idx: i + 1, total: pairs.length, sides: p }));
 }
@@ -998,9 +1007,9 @@ function drawClassic(doc, ox, oy, lab, created, warn) {
   doc.line(X(L.X_L), Y(L.RULE_Y), X(L.RULE_X2), Y(L.RULE_Y));
 
   sides.forEach(([side, tracks], si) => {
-    if (tracks.length > L.SLOTS) warn?.(`${rec.artist} – ${rec.album}: Seite ${side} hat ${tracks.length} Tracks, gedruckt werden die ersten ${L.SLOTS}.`);
-    tracks.slice(0, L.SLOTS).forEach((t, n) => {
-      const y = L.ROW0 + si * L.SIDE_GAP + n * L.ROW_PITCH;
+    const pitch = sides.length === 1 ? fitPitch(tracks.length, L.ROW0, L.ROW_PITCH) : L.ROW_PITCH;
+    tracks.forEach((t, n) => {
+      const y = L.ROW0 + si * L.SIDE_GAP + n * pitch;
       doc.setFont("Heros", "bold"); doc.setFontSize(L.FS);
       doc.text(fitText(doc, t.label, L.X_TITLE - L.X_NO - 0.8), X(L.X_NO), Y(y));
       doc.text(fitText(doc, t.title, L.TITLE_MAX), X(L.X_TITLE), Y(y));
@@ -1017,11 +1026,8 @@ function drawClassic(doc, ox, oy, lab, created, warn) {
 
 /* ===== Alternative Label-Designs (gleiche Größe, gleicher Inhalt) ===== */
 const GREY = 115;
-function sideRows(lab, warn) {
-  return lab.sides.map(([side, tracks]) => {
-    if (tracks.length > L.SLOTS) warn?.(`${lab.rec.artist} – ${lab.rec.album}: Seite ${side} hat ${tracks.length} Tracks, gedruckt werden die ersten ${L.SLOTS}.`);
-    return [side, tracks.slice(0, L.SLOTS)];
-  });
+function sideRows(lab) {
+  return lab.sides;
 }
 function circles(doc, xRight, yMid, d = 2.0, pitch = 2.55, color = 0, fill = null) {
   doc.setDrawColor(color); doc.setLineWidth(0.25 * PT);
@@ -1047,6 +1053,7 @@ function trackBlock(doc, X, Y, rows, top, pitch, sideGap, headY) {
   doc.setDrawColor(0); doc.setLineWidth(0.25 * PT); doc.line(X(3), Y(headY + 1.3), X(98), Y(headY + 1.3));
   rows.forEach(([side, tracks], si) => {
     const y0 = top + si * (L.SLOTS * pitch + sideGap);
+    if (rows.length === 1) pitch = fitPitch(tracks.length, top, pitch);
     if (si) { doc.setDrawColor(190); doc.setLineWidth(0.25 * PT); doc.line(X(3), Y(y0 - sideGap / 2 - 1.4), X(98), Y(y0 - sideGap / 2 - 1.4)); }
     tracks.forEach((t, n) => {
       const y = y0 + n * pitch;
@@ -1076,7 +1083,7 @@ function drawRaster(doc, ox, oy, lab, created, warn) {
   micro(doc, "Genre", rec.genre, X(25.5), Y(14.9), 23.5);
   micro(doc, "Jahr", rec.year, X(51.5), Y(14.9), 32);
   micro(doc, "Erstellt", created, X(85), Y(14.9), 13.5);
-  trackBlock(doc, X, Y, sideRows(lab, warn), 27.4, 4.1, 4.1, 22.3);
+  trackBlock(doc, X, Y, sideRows(lab), 27.4, 4.1, 4.1, 22.3);
 }
 
 /* Monogramm: großer Seitenbuchstabe neben jeder Plattenseite */
@@ -1093,13 +1100,14 @@ function drawMono(doc, ox, oy, lab, created, warn) {
   doc.text(fitText(doc, rec.genre, 32), X(40), Y(6.4));
   doc.text(fitText(doc, rec.year, 32), X(40), Y(9.8));
   doc.setDrawColor(0); doc.setLineWidth(0.6 * PT); doc.line(X(3), Y(13.2), X(98), Y(13.2));
-  sideRows(lab, warn).forEach(([side, tracks], si) => {
+  sideRows(lab).forEach(([side, tracks], si) => {
     const y0 = 17.6 + si * 27.2;
     doc.setFont("Heros", "bold"); doc.setFontSize(36); doc.setTextColor(0);
     doc.text(side, X(2.4), Y(y0 + 10.2));
     if (si) { doc.setDrawColor(190); doc.setLineWidth(0.25 * PT); doc.line(X(15), Y(y0 - 3.0), X(98), Y(y0 - 3.0)); }
+    const pitch = lab.sides.length === 1 ? fitPitch(tracks.length, y0 + 1.6, 4.25) : 4.25;
     tracks.forEach((t, n) => {
-      const y = y0 + 1.6 + n * 4.25;
+      const y = y0 + 1.6 + n * pitch;
       const num = (t.label.split("/")[1] || t.label);
       doc.setFont("Heros", "normal"); doc.setFontSize(7.5); doc.setTextColor(GREY);
       doc.text(num, X(15.5), Y(y));
@@ -1128,7 +1136,7 @@ function drawContrast(doc, ox, oy, lab, created, warn) {
   doc.text(fitText(doc, rec.genre, 38), X(5.5), Y(16.9));
   doc.text(fitText(doc, rec.year, 38), X(46), Y(16.9));
   doc.setDrawColor(240); cross(doc, X(95.5), Y(16.4), 0.7);
-  trackBlock(doc, X, Y, sideRows(lab, warn), 28.9, 4.1, 4.0, 24.0);
+  trackBlock(doc, X, Y, sideRows(lab), 28.9, 4.1, 4.0, 24.0);
 }
 
 /* Monogramm × Kontrast – hell und dunkel */
@@ -1150,13 +1158,14 @@ function drawMonoTheme(doc, ox, oy, lab, created, warn, th) {
   doc.text(fitText(doc, rec.genre, 38), X(5.5), Y(16.9));
   doc.text(fitText(doc, rec.year, 38), X(46), Y(16.9));
   doc.setDrawColor(th.title); cross(doc, X(95.5), Y(16.4), 0.7);
-  sideRows(lab, warn).forEach(([side, tracks], si) => {
+  sideRows(lab).forEach(([side, tracks], si) => {
     const y0 = 24.6 + si * 23.4;
     doc.setFont("Heros", "bold"); doc.setFontSize(32); doc.setTextColor(th.letter);
     doc.text(side, X(3.2), Y(y0 + 9.6));
     if (si) { doc.setDrawColor(th.rule); doc.setLineWidth(0.25 * PT); doc.line(X(15), Y(y0 - 2.6), X(98), Y(y0 - 2.6)); }
+    const pitch = lab.sides.length === 1 ? fitPitch(tracks.length, y0 + 1.6, 4.15) : 4.15;
     tracks.forEach((t, n) => {
-      const y = y0 + 1.6 + n * 4.15;
+      const y = y0 + 1.6 + n * pitch;
       const num = (t.label.split("/")[1] || t.label);
       doc.setFont("Heros", "normal"); doc.setFontSize(7.5); doc.setTextColor(th.num);
       doc.text(num, X(15.5), Y(y));
@@ -1709,7 +1718,7 @@ function renderEditor() {
     const r = getRec(id);
     if (!r) return `<section class="rec loading"><div class="rh"><span class="cov big"></span><div><b>${esc(labelOf(id))}</b><p class="muted">wird geladen …</p></div></div></section>`;
     const labs = splitLabels(r), nums = trackNumbers(r);
-    const over = labs.flatMap(l => l.sides).filter(([, ts]) => ts.length > L.SLOTS).map(([s, ts]) => `Seite ${s}: ${ts.length} Tracks`);
+    const over = labs.flatMap(l => l.sides).filter(([, ts]) => ts.length > L.SLOTS).map(([s, ts]) => `Seite ${s} (${ts.length} Tracks)`);
     const gaps = gapCount(r), skipped = r.tracks.filter(t => t.skip).length;
     const linkLabel = /musicbrainz/.test(r.link || "") ? "MusicBrainz" : "Discogs";
     return `<section class="rec" data-rec="${esc(id)}">
@@ -1734,7 +1743,7 @@ function renderEditor() {
         <button class="link" data-reload="${esc(id)}" title="Discogs-Daten neu laden, eigene Eingaben gehen verloren">neu laden</button>
       </div>
       ${r.note ? `<p class="${r.noteErr ? "warn" : "note"}">${esc(r.note)}</p>` : ""}
-      ${over.length ? `<p class="warn">Das Layout fasst 5 Tracks pro Seite (${esc(over.join(", "))}). Überzählige Tracks werden nicht gedruckt.</p>` : ""}
+      ${over.length ? `<p class="note">${esc(over.join(", "))} ${over.length === 1 ? "bekommt" : "bekommen"} ein eigenes Label, damit jede Seite vollständig auf einem Label steht.</p>` : ""}
       <table>
         <thead><tr><th>Nr.</th><th>Titel</th><th>Dauer</th><th>Tonart</th><th></th><th>BPM</th><th></th></tr></thead>
         <tbody>${r.tracks.map((t, k) => {
