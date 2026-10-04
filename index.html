@@ -68,7 +68,9 @@ main { padding: 20px 28px 48px; min-width: 0; }
 .seg button[aria-pressed=true] { background: var(--s3); color: var(--fg); }
 .srcpane { margin-bottom: 4px; }
 .seg.mini { margin: 0; display: inline-grid; grid-template-columns: repeat(3, auto); }
-.seg.mini button { padding: 7px 14px; font-size: 13px; }
+.seg.mini button { padding: 7px 16px; font-size: 13px; }
+.design { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 4px 0 14px; }
+.dlabel { color: var(--mute); font-size: 13px; }
 .row { display: flex; gap: 8px; }
 .row .field { flex: 1; width: auto; }
 .field { min-width: 0; width: 100%; background: var(--s1); border: 1px solid var(--line); border-radius: 8px; padding: 8px 11px; transition: border-color .2s var(--ease); }
@@ -225,7 +227,8 @@ dialog[open] { animation: slide .25s var(--ease); }
   main { padding: 18px 16px 24px; }
   .bar { gap: 8px; }
   .bar #make { display: none; }
-  .seg.mini { order: 5; width: 100%; grid-template-columns: repeat(3, 1fr); }
+  .seg.mini { width: 100%; grid-template-columns: repeat(3, 1fr); }
+  .design { gap: 8px; }
 
   .rec { padding: 14px 14px 6px; border-radius: 12px; }
   .rh { flex-wrap: wrap; gap: 12px; }
@@ -344,11 +347,6 @@ dialog[open] { animation: slide .25s var(--ease); }
 <main>
   <div class="bar">
     <h2 class="eyebrow">Labels prüfen</h2><span id="selcount"></span><span class="sp"></span>
-    <div class="seg mini" role="group" aria-label="Label-Design" id="stylesel">
-      <button type="button" data-style="classic" aria-pressed="false">Klassik</button>
-      <button type="button" data-style="light" aria-pressed="false">Hell</button>
-      <button type="button" data-style="dark" aria-pressed="false">Dunkel</button>
-    </div>
     <button class="btn ghost" id="fillall" type="button" disabled>Alle Lücken suchen</button>
     <button class="btn" id="make" type="button" disabled>Labels erstellen</button>
   </div>
@@ -362,6 +360,14 @@ dialog[open] { animation: slide .25s var(--ease); }
     <a class="btn ghost" id="openpdf" href="#" target="_blank" rel="noopener">PDF öffnen ↗</a>
     <a class="btn ghost" id="download" href="#">Herunterladen ↓</a>
     <button class="btn" id="markprinted" type="button">Als gedruckt markieren</button>
+  </div>
+  <div class="design">
+    <span class="dlabel">Design deiner Vinyl Labels:</span>
+    <div class="seg mini" role="group" aria-label="Design deiner Vinyl Labels" id="stylesel">
+      <button type="button" data-style="classic" aria-pressed="false">Klassik</button>
+      <button type="button" data-style="light" aria-pressed="false">Hell</button>
+      <button type="button" data-style="dark" aria-pressed="false">Dunkel</button>
+    </div>
   </div>
   <p id="outinfo"></p>
   <div class="sheet"><iframe id="frame" title="Vorschau des Druckbogens"></iframe></div>
