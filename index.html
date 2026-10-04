@@ -1005,9 +1005,10 @@ function sideRows(lab, warn) {
     return [side, tracks.slice(0, L.SLOTS)];
   });
 }
-function circles(doc, xRight, yMid, d = 2.0, pitch = 2.55, color = 0) {
+function circles(doc, xRight, yMid, d = 2.0, pitch = 2.55, color = 0, fill = null) {
   doc.setDrawColor(color); doc.setLineWidth(0.25 * PT);
-  for (let k = 0; k < 5; k++) doc.circle(xRight - d / 2 - (4 - k) * pitch, yMid, d / 2, "S");
+  if (fill != null) doc.setFillColor(fill, fill, fill);
+  for (let k = 0; k < 5; k++) doc.circle(xRight - d / 2 - (4 - k) * pitch, yMid, d / 2, fill != null ? "FD" : "S");
 }
 function cross(doc, x, y, s = 0.8) {
   doc.setLineWidth(0.25 * PT); doc.line(x - s, y, x + s, y); doc.line(x, y - s, x, y + s);
@@ -1115,7 +1116,7 @@ function drawContrast(doc, ox, oy, lab, created, warn) {
 /* Monogramm × Kontrast – hell und dunkel */
 const THEMES = {
   light: { bg: null, card: 14, title: 240, sub: 200, meta: 150, letter: 0, num: GREY, text: 0, ring: 0, rule: 190, cut: 0 },
-  dark:  { bg: 18, card: 46, title: 245, sub: 205, meta: 150, letter: 245, num: 140, text: 235, ring: 200, rule: 75, cut: 150 },
+  dark:  { bg: 18, card: 46, title: 245, sub: 205, meta: 150, letter: 245, num: 140, text: 235, ring: 255, ringFill: 255, rule: 75, cut: 150 },
 };
 function drawMonoTheme(doc, ox, oy, lab, created, warn, th) {
   const { rec, idx, total } = lab, X = d => ox + d, Y = d => oy + d;
@@ -1147,7 +1148,7 @@ function drawMonoTheme(doc, ox, oy, lab, created, warn, th) {
       doc.text(t.dur || "–", X(60), Y(y), { align: "right" });
       doc.text(toCamelot(t.key) || "–", X(63.5), Y(y));
       doc.text(fixBpm(t.bpm) || "–", X(72), Y(y));
-      circles(doc, X(98), Y(y - 0.95), 2.0, 2.55, th.ring);
+      circles(doc, X(98), Y(y - 0.95), 2.0, 2.55, th.ring, th.ringFill ?? null);
     });
   });
 }
