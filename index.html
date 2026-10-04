@@ -92,10 +92,16 @@ td { padding: 1px 6px 1px 0; vertical-align: baseline; }
 td.pos { font-weight: 700; width: 3.2em; white-space: nowrap; }
 td.cam { font-weight: 700; width: 2.6em; }
 td small { color: var(--muted); margin-left: 4px; white-space: nowrap; }
+td.act { width: 1%; white-space: nowrap; text-align: right; }
+.del { border: 0; background: none; color: var(--muted); font-size: 18px; line-height: 1; padding: 2px 6px; cursor: pointer; }
+.del:hover, .del:focus-visible { color: var(--magenta); }
+tr.skip td { color: var(--muted); padding: 4px 6px 4px 0; }
 td input { border: 0; border-bottom: 1px solid transparent; background: transparent; padding: 3px 0; width: 100%; font-weight: 700; }
 td input:hover, td input:focus { border-bottom-color: var(--ink); }
 td input.miss { border-bottom-color: var(--magenta); }
 td input[data-t=dur], td input[data-t=bpm] { width: 4.5em; }
+td input[data-t=num] { width: 3.6em; }
+tr.skip input[data-t=num] { color: var(--muted); }
 td input[data-t=key] { width: 7em; }
 input::placeholder { color: #a8a8a8; font-weight: 400; }
 
@@ -175,6 +181,7 @@ input::placeholder { color: #a8a8a8; font-weight: 400; }
 <main>
   <div class="bar">
     <h2>Labels prüfen</h2><span id="selcount"></span><span class="sp"></span>
+    <button class="btn ghost" id="fillall" type="button">Alle Lücken suchen</button>
     <button class="btn" id="make" type="button" disabled>PDF erstellen</button>
   </div>
   <div id="editor"></div>
@@ -689,25 +696,35 @@ function normalizeRelease(rel, basic, masterYear) {
   };
 }
 
+/** Seite eines Tracks: eigene Nummer (z. B. "B/03") hat Vorrang vor der Discogs-Position. */
+function sideOf(t) {
+  const m = String(t.num || t.pos || "").match(/^([A-Z])/i);
+  return m ? m[1].toUpperCase() : "";
+}
+
+/** Standardnummern pro Track ("A/01" …). Entfernte Tracks behalten ihren Platz in der Zählung. */
+function trackNumbers(rec) {
+  const count = {}, out = [];
+  const noLetter = rec.tracks.map((t, i) => sideOf(t) ? null : i).filter(i => i !== null);
+  const half = Math.ceil(noLetter.length / 2);
+  rec.tracks.forEach((t, i) => {
+    let s = sideOf(t);
+    if (!s) s = noLetter.indexOf(i) < half ? "A" : "B";
+    count[s] = (count[s] || 0) + 1;
+    out.push({ side: s, label: `${s}/${String(count[s]).padStart(2, "0")}` });
+  });
+  return out;
+}
+
 /** Tracks nach Plattenseiten gruppieren -> Labels (je zwei Seiten pro Label). */
 function splitLabels(rec) {
-  const sides = [], bySide = {};
-  const noLetter = [];
-  rec.tracks.forEach(t => {
-    const m = t.pos.match(/^([A-Z])/i);
-    if (!m) { noLetter.push(t); return; }
-    const s = m[1].toUpperCase();
+  const nums = trackNumbers(rec), sides = [], bySide = {};
+  rec.tracks.forEach((t, i) => {
+    const s = nums[i].side;
     if (!bySide[s]) { bySide[s] = []; sides.push(s); }
-    bySide[s].push(t);
+    if (!t.skip) bySide[s].push({ ...t, label: (t.num || "").trim() || nums[i].label });
   });
-  if (noLetter.length) {               // Positionen ohne Seitenbuchstaben: hälftig auf A/B verteilen
-    const half = Math.ceil(noLetter.length / 2);
-    [["A", noLetter.slice(0, half)], ["B", noLetter.slice(half)]].forEach(([s, ts]) => {
-      if (!ts.length) return;
-      if (!bySide[s]) { bySide[s] = []; sides.push(s); }
-      bySide[s].push(...ts);
-    });
-  }
+  sides.sort();
   const pairs = [];
   for (let i = 0; i < sides.length; i += 2) pairs.push(sides.slice(i, i + 2).map(s => [s, bySide[s]]));
   if (!pairs.length) pairs.push([]);
@@ -756,7 +773,7 @@ function drawLabel(doc, ox, oy, lab, created, warn) {
     tracks.slice(0, L.SLOTS).forEach((t, n) => {
       const y = L.ROW0 + si * L.SIDE_GAP + n * L.ROW_PITCH;
       doc.setFont("Heros", "bold"); doc.setFontSize(L.FS);
-      doc.text(`${side}/${String(n + 1).padStart(2, "0")}`, X(L.X_NO), Y(y));
+      doc.text(fitText(doc, t.label, L.X_TITLE - L.X_NO - 0.8), X(L.X_NO), Y(y));
       doc.text(fitText(doc, t.title, L.TITLE_MAX), X(L.X_TITLE), Y(y));
       doc.text(t.dur || "–", X(L.X_DUR_R), Y(y), { align: "right" });
       doc.text(toCamelot(t.key) || "–", X(L.X_CAM), Y(y));
@@ -818,7 +835,7 @@ function todayDE(d = new Date()) {
   return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
 }
 
-if (typeof module !== "undefined") module.exports = { L, toCamelot, fixBpm, normalizeRelease, splitLabels, arrangeRows, buildPdf, todayDE };
+if (typeof module !== "undefined") module.exports = { L, trackNumbers, toCamelot, fixBpm, normalizeRelease, splitLabels, arrangeRows, buildPdf, todayDE };
 </script>
 <script>/* ===== Vinyl Crates – Oberfläche & Discogs ===== */
 const API = "https://api.discogs.com";
@@ -949,7 +966,7 @@ async function durationsFromMusicBrainz(rec) {
 
 /* ---- GetSongBPM (Tonart & BPM) ---- */
 const GSB_PROXY = "";   // optional: Adresse einer Zwischenstation, falls GetSongBPM Browser-Anfragen blockiert
-let gsbLast = 0;
+let gsbLast = 0, gsbRetry = 0;
 async function gsbSearch(lookup) {
   const w = gsbLast + 1000 - Date.now(); if (w > 0) await new Promise(r => setTimeout(r, w));
   gsbLast = Date.now();
@@ -961,7 +978,14 @@ async function gsbSearch(lookup) {
   try { res = await fetch(url); }
   catch { const e = new Error("GetSongBPM blockiert Anfragen direkt aus dem Browser."); e.blocked = true; throw e; }
   if (res.status === 401 || res.status === 403) throw new Error("GetSongBPM lehnt den API-Key ab.");
-  if (res.status === 429) throw new Error("GetSongBPM: stündliches Abfrage-Limit erreicht, später erneut versuchen.");
+  if (res.status === 429) {
+    gsbRetry = (gsbRetry || 0) + 1;
+    if (gsbRetry > 3) { gsbRetry = 0; throw new Error("GetSongBPM: Abfrage-Limit erreicht. Später „Lücken suchen“ klicken."); }
+    status("GetSongBPM bremst kurz (zu viele Anfragen). Es geht in einer Minute automatisch weiter …");
+    await new Promise(r => setTimeout(r, 61000));
+    return gsbSearch(lookup);
+  }
+  gsbRetry = 0;
   if (!res.ok) throw new Error(`GetSongBPM antwortet mit Fehler ${res.status}.`);
   const data = await res.json().catch(() => ({}));
   if (data.error) throw new Error("GetSongBPM: " + data.error);
@@ -971,7 +995,7 @@ async function gsbSearch(lookup) {
 /** Füllt fehlende Tonart/BPM. Ergebnis wird als Hinweis an der Platte gespeichert. */
 async function lookupKeys(rec) {
   const artist = rec.artist.split(/ & |, | and /)[0];
-  const todo = rec.tracks.filter(t => !toCamelot(t.key) || !fixBpm(t.bpm));
+  const todo = rec.tracks.filter(t => !t.skip && (!toCamelot(t.key) || !fixBpm(t.bpm)));
   let found = 0;
   try {
     for (const t of todo) {
@@ -1010,7 +1034,7 @@ function queueDetails(id) {
     if (!state.selected.includes(id)) return renderEditor();
     const cached = getRec(id);
     if (cached) {
-      if (!cached.checked && hasGaps(cached)) { renderEditor(); await autoFill(id); }
+      if ((!cached.checked || cached.noteErr) && hasGaps(cached)) { renderEditor(); await autoFill(id); }
       return renderEditor();
     }
     status(`Lade Tracklist: ${labelOf(id)} …`);
@@ -1072,7 +1096,8 @@ function renderEditor() {
     if (!r) return `<section class="rec loading"><h3>${esc(labelOf(id))}</h3><p>Tracklist wird von Discogs geladen …</p></section>`;
     const labs = splitLabels(r);
     const over = labs.flatMap(l => l.sides).filter(([, ts]) => ts.length > L.SLOTS).map(([s, ts]) => `Seite ${s}: ${ts.length} Tracks`);
-    const gaps = r.tracks.filter(t => !t.dur || !toCamelot(t.key) || !fixBpm(t.bpm)).length;
+    const gaps = r.tracks.filter(t => !t.skip && (!t.dur || !toCamelot(t.key) || !fixBpm(t.bpm))).length;
+    const skipped = r.tracks.filter(t => t.skip).length;
     return `<section class="rec" data-rec="${id}">
       <header>
         <div class="head">
@@ -1081,25 +1106,30 @@ function renderEditor() {
           <input data-f="genre" value="${esc(r.genre)}" aria-label="Genre">
           <input data-f="year" value="${esc(r.year)}" aria-label="Erscheinungsjahr">
         </div>
-        <div class="meta">${labs.length === 1 ? "1 Label" : labs.length + " Labels"}${gaps ? ` · <span class="gap">${gaps} Tracks mit Lücken</span>` : ""}
+        <div class="meta">${labs.length === 1 ? "1 Label" : labs.length + " Labels"}${gaps ? ` · <span class="gap">${gaps} Tracks mit Lücken</span>` : ""}${skipped ? ` · ${skipped} ${skipped === 1 ? "Track" : "Tracks"} entfernt` : ""}
           ${gaps ? `<button class="link" data-lookup="${id}">Lücken suchen</button>` : ""}
-          <button class="link" data-remove="${id}">entfernen</button>
+          <button class="link" data-remove="${id}">aus Auswahl nehmen</button>
           <button class="link" data-reload="${id}" title="Discogs-Daten neu laden, eigene Eingaben gehen verloren">neu laden</button></div>
         ${r.note ? `<p class="${r.noteErr ? "warn" : "note"}">${esc(r.note)}</p>` : ""}
         ${over.length ? `<p class="warn">Das Layout fasst 5 Tracks pro Seite (${esc(over.join(", "))}). Überzählige Tracks werden nicht gedruckt.</p>` : ""}
       </header>
       <table>
-        <thead><tr><th>Pos.</th><th>Titel</th><th>Dauer</th><th>Tonart</th><th></th><th>BPM</th></tr></thead>
-        <tbody>${r.tracks.map((t, k) => {
+        <thead><tr><th>Nr.</th><th>Titel</th><th>Dauer</th><th>Tonart</th><th></th><th>BPM</th><th></th></tr></thead>
+        <tbody>${(() => { const nums = trackNumbers(r); return r.tracks.map((t, k) => {
           const cam = toCamelot(t.key), bpm = fixBpm(t.bpm);
+          const numTd = `<td class="pos"><input data-t="num" value="${esc(t.num || nums[k].label)}" placeholder="${nums[k].label}" size="4" title="Nummer auf dem Label${t.pos ? " (Discogs: " + esc(t.pos) + ")" : ""}"></td>`;
+          if (t.skip) return `<tr data-k="${k}" class="skip">
+            ${numTd}<td colspan="5"><s>${esc(t.title)}</s></td>
+            <td class="act"><button class="link" data-skip="${k}">zurückholen</button></td></tr>`;
           return `<tr data-k="${k}">
-            <td class="pos">${esc(t.pos)}</td>
+            ${numTd}
             <td><input data-t="title" value="${esc(t.title)}"></td>
             <td><input data-t="dur" class="${t.dur ? "" : "miss"}" value="${esc(t.dur)}" placeholder="m:ss" size="5"></td>
             <td><input data-t="key" class="${cam ? "" : "miss"}" value="${esc(t.key)}" placeholder="z. B. Am" size="7" title="Tonart (Am, F#m, a-Moll, Fis-Dur) oder Camelot (8A)"></td>
             <td class="cam">${cam || ""}</td>
             <td><input data-t="bpm" class="${bpm ? "" : "miss"}" value="${esc(t.bpm)}" inputmode="numeric" size="4">${bpm && bpm !== String(Math.round(+t.bpm)) ? `<small title="Wert über ${L.BPM_MAX} wurde halbiert">→ ${bpm}</small>` : ""}</td>
-          </tr>`; }).join("")}</tbody>
+            <td class="act"><button class="del" data-skip="${k}" title="Track nicht drucken" aria-label="${esc(t.title)} nicht drucken">×</button></td>
+          </tr>`; }).join(""); })()}</tbody>
       </table>
     </section>`;
   }).join("");
@@ -1111,6 +1141,12 @@ function onEditorInput(e) {
   if (e.target.dataset.f) r[e.target.dataset.f] = e.target.value;
   if (e.target.dataset.t) {
     const k = +e.target.closest("tr").dataset.k, f = e.target.dataset.t;
+    if (f === "num") {
+      const def = trackNumbers({ ...r, tracks: r.tracks.map((t, i) => i === k ? { ...t, num: "" } : t) })[k].label;
+      const v = e.target.value.trim().toUpperCase();
+      if (!v || v === def) delete r.tracks[k].num; else r.tracks[k].num = v;
+      setRec(id, r); return;
+    }
     r.tracks[k][f] = e.target.value;
     if (f === "key") { const c = toCamelot(e.target.value); e.target.closest("tr").querySelector(".cam").textContent = c; e.target.classList.toggle("miss", !c); }
     if (f === "dur") e.target.classList.toggle("miss", !e.target.value.trim());
@@ -1119,7 +1155,7 @@ function onEditorInput(e) {
   setRec(id, r);
 }
 
-const hasGaps = r => r.tracks.some(t => !t.dur || !toCamelot(t.key) || !fixBpm(t.bpm));
+const hasGaps = r => r.tracks.some(t => !t.skip && (!t.dur || !toCamelot(t.key) || !fixBpm(t.bpm)));
 async function autoFill(id) {
   const rec = getRec(id); if (!rec) return;
   try { if (rec.tracks.some(t => !t.dur)) await durationsFromMusicBrainz(rec); } catch {}
@@ -1132,7 +1168,7 @@ async function fillGaps(id, btn) {
   btn.disabled = true; btn.textContent = "suche …";
   await autoFill(id);
   const r = getRec(id);
-  const left = r.tracks.filter(t => !t.dur || !toCamelot(t.key) || !fixBpm(t.bpm)).length;
+  const left = r.tracks.filter(t => !t.skip && (!t.dur || !toCamelot(t.key) || !fixBpm(t.bpm))).length;
   if (r.noteErr) toast(r.note, true);
   else toast(left ? `${left} Tracks haben noch Lücken – bitte von Hand ergänzen.` : "Alle Werte gefunden.", !!left);
   renderEditor();
@@ -1225,13 +1261,27 @@ function init() {
     const p = getPrinted(), d = todayDE(); state.collection.forEach(i => p[i.id] = p[i.id] || d); setPrinted(p); renderList();
   });
   $("#editor").addEventListener("input", onEditorInput);
+  $("#editor").addEventListener("change", e => { if (e.target.dataset.t === "num") renderEditor(); });
   $("#editor").addEventListener("click", e => {
     const rm = +e.target.dataset.remove, rl = +e.target.dataset.reload, lk = +e.target.dataset.lookup;
     if (lk) fillGaps(lk, e.target);
+    if (e.target.dataset.skip !== undefined) {
+      const sec = e.target.closest("[data-rec]"), id = +sec.dataset.rec, r = getRec(id);
+      const t = r.tracks[+e.target.dataset.skip]; t.skip = !t.skip; setRec(id, r); renderEditor();
+    }
     if (rm) { state.selected = state.selected.filter(x => x !== rm); renderList(); renderEditor(); }
     if (rl && confirm("Discogs-Daten neu laden? Deine Eingaben zu dieser Platte gehen verloren.")) { localStorage.removeItem(LS + "rel:" + rl); renderEditor(); queueDetails(rl); }
   });
   $("#make").addEventListener("click", makePdf);
+  $("#fillall").addEventListener("click", async e => {
+    const btn = e.target, ids = state.selected.filter(id => getRec(id) && hasGaps(getRec(id)));
+    if (!ids.length) { toast("Keine Lücken bei den ausgewählten Platten."); return; }
+    btn.disabled = true;
+    for (const [n, id] of ids.entries()) { btn.textContent = `suche ${n + 1} von ${ids.length} …`; await autoFill(id); renderEditor(); }
+    btn.disabled = false; btn.textContent = "Alle Lücken suchen";
+    const err = ids.map(getRec).find(r => r.noteErr);
+    toast(err ? err.note : "Suche abgeschlossen.", !!err);
+  });
   $("#markprinted").addEventListener("click", markPrinted);
   $("#export").addEventListener("click", exportData);
   $("#import").addEventListener("change", e => e.target.files[0] && importData(e.target.files[0]));
