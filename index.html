@@ -966,11 +966,11 @@ async function durationsFromMusicBrainz(rec) {
 
 /* ---- GetSongBPM (Tonart & BPM) ---- */
 const GSB_PROXY = "";   // optional: Adresse einer Zwischenstation, falls GetSongBPM Browser-Anfragen blockiert
-let gsbLast = 0, gsbRetry = 0;
-async function gsbSearch(lookup) {
-  const w = gsbLast + 1000 - Date.now(); if (w > 0) await new Promise(r => setTimeout(r, w));
+let gsbLast = 0, gsbRetry = 0, gsbLastInfo = "";
+async function gsbSearch(lookup, type = "both") {
+  const w = gsbLast + 1500 - Date.now(); if (w > 0) await new Promise(r => setTimeout(r, w));
   gsbLast = Date.now();
-  const q = `type=both&lookup=${encodeURIComponent(lookup)}`;
+  const q = `type=${type}&lookup=${encodeURIComponent(lookup)}`;
   const url = (state.settings.proxy || GSB_PROXY)
     ? `${state.settings.proxy || GSB_PROXY}?${q}`
     : `https://api.getsong.co/search/?api_key=${encodeURIComponent(gsbKey())}&${q}`;
@@ -983,27 +983,38 @@ async function gsbSearch(lookup) {
     if (gsbRetry > 3) { gsbRetry = 0; throw new Error("GetSongBPM: Abfrage-Limit erreicht. Später „Lücken suchen“ klicken."); }
     status("GetSongBPM bremst kurz (zu viele Anfragen). Es geht in einer Minute automatisch weiter …");
     await new Promise(r => setTimeout(r, 61000));
-    return gsbSearch(lookup);
+    return gsbSearch(lookup, type);
   }
   gsbRetry = 0;
   if (!res.ok) throw new Error(`GetSongBPM antwortet mit Fehler ${res.status}.`);
   const data = await res.json().catch(() => ({}));
-  if (data.error) throw new Error("GetSongBPM: " + data.error);
-  return Array.isArray(data.search) ? data.search : [];
+  if (Array.isArray(data.search)) { gsbLastInfo = ""; return data.search; }
+  // Fehler stecken bei GetSongBPM oft in {"search":{"error":"…"}} oder {"error":"…"}
+  const err = data.search?.error || data.error || "";
+  if (!err || /no result/i.test(err)) { gsbLastInfo = "kein Treffer"; return []; }
+  throw new Error("GetSongBPM: " + err);
 }
+
+const squash = s => normTitle(s).replace(/ /g, "");
+const queryText = s => String(s || "").replace(/\(.*?\)|\[.*?\]/g, " ").replace(/\s+\(\d+\)$/, "").replace(/[“”"]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
 
 /** Füllt fehlende Tonart/BPM. Ergebnis wird als Hinweis an der Platte gespeichert. */
 async function lookupKeys(rec) {
-  const artist = rec.artist.split(/ & |, | and /)[0];
+  const artist = cleanName(rec.artist.split(/ & |, | and | x | feat\. /i)[0]);
+  const aKey = squash(artist);
+  const artistOk = x => { const n = squash(x.artist?.name); return !!n && (n.includes(aKey) || aKey.includes(n)); };
   const todo = rec.tracks.filter(t => !t.skip && (!toCamelot(t.key) || !fixBpm(t.bpm)));
   let found = 0;
   try {
     for (const t of todo) {
       status(`Suche Tonart und BPM: ${t.title} …`);
-      const list = await gsbSearch(`song:${normTitle(t.title)} artist:${normTitle(artist)}`);
-      const a = normTitle(artist).split(" ")[0];
-      const hit = list.find(x => sameTitle(x.title, t.title) && normTitle(x.artist?.name).includes(a)) ||
-                  list.find(x => sameTitle(x.title, t.title));
+      // 1. Titel + Interpret, 2. nur Titel (Interpret wird dann im Ergebnis geprüft)
+      let list = await gsbSearch(`song:${queryText(t.title)} artist:${queryText(artist)}`);
+      let hit = list.find(x => sameTitle(x.title, t.title) && artistOk(x)) || list.find(x => sameTitle(x.title, t.title));
+      if (!hit) {
+        list = await gsbSearch(queryText(t.title), "song");
+        hit = list.find(x => sameTitle(x.title, t.title) && artistOk(x));
+      }
       if (hit) {
         if (!toCamelot(t.key) && toCamelot(hit.key_of)) t.key = hit.key_of;
         if (!fixBpm(t.bpm) && +hit.tempo) t.bpm = String(hit.tempo);
@@ -1012,7 +1023,7 @@ async function lookupKeys(rec) {
     }
     rec.note = todo.length ? `Tonart/BPM: für ${found} von ${todo.length} Tracks gefunden.` : "";
   } catch (e) {
-    rec.note = e.message; rec.noteErr = true; throw e;
+    rec.note = (found ? `Tonart/BPM: ${found} gefunden, dann abgebrochen – ` : "") + e.message; rec.noteErr = true; throw e;
   } finally { status(""); }
   rec.noteErr = false;
   return found;
@@ -1024,7 +1035,17 @@ async function testConnection() {
   try {
     const list = await gsbSearch("song:smooth operator artist:sade");
     const hit = list.find(x => sameTitle(x.title, "Smooth Operator"));
-    out.textContent = hit ? `Verbindung klappt: Smooth Operator = ${hit.key_of || "?"}, ${hit.tempo || "?"} BPM.` : "Verbindung klappt, aber kein Treffer für den Testsong.";
+    let msg = hit ? `Verbindung klappt: Smooth Operator = ${hit.key_of || "?"}, ${hit.tempo || "?"} BPM.` : "Verbindung klappt, aber kein Treffer für den Testsong.";
+    // Zusätzlich ein Track aus der aktuellen Auswahl, um Suchprobleme sichtbar zu machen
+    const rec = state.selected.map(getRec).find(r => r && r.tracks.some(t => !t.skip && !toCamelot(t.key)));
+    if (rec) {
+      const t = rec.tracks.find(t => !t.skip && !toCamelot(t.key));
+      const artist = cleanName(rec.artist.split(/ & |, | and | x | feat\. /i)[0]);
+      const q = `song:${queryText(t.title)} artist:${queryText(artist)}`;
+      const l2 = await gsbSearch(q);
+      msg += ` Test „${t.title}“ (${artist}): ${l2.length ? l2.length + " Treffer, z. B. " + l2.slice(0, 3).map(x => `${x.title} – ${x.artist?.name} (${x.key_of || "?"}, ${x.tempo || "?"})`).join("; ") : (gsbLastInfo || "keine Treffer")}.`;
+    }
+    out.textContent = msg;
   } catch (e) { out.textContent = e.message; out.className = "err"; }
 }
 
