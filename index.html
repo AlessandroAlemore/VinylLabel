@@ -84,6 +84,8 @@ summary { cursor: pointer; }
 .meta { font-size: 13px; color: var(--muted); margin-top: 6px; display: flex; gap: 14px; flex-wrap: wrap; }
 .gap { color: var(--magenta); }
 .warn { color: var(--magenta); font-size: 13px; margin: 6px 0 0; }
+.note { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+#gsbtest.err { color: var(--magenta); }
 table { width: 100%; border-collapse: collapse; border-top: 2px solid var(--ink); }
 th { text-align: left; font-weight: 400; font-size: 12px; color: var(--muted); padding: 6px 6px 2px 0; }
 td { padding: 1px 6px 1px 0; vertical-align: baseline; }
@@ -149,9 +151,10 @@ input::placeholder { color: #a8a8a8; font-weight: 400; }
     <input type="password" id="token" placeholder="Persönlicher Token (optional)" autocomplete="off">
   </details>
   <details>
-    <summary>Eigener Key für Tonart und BPM</summary>
+    <summary>Tonart und BPM: Verbindung prüfen</summary>
     <p>Tonart und BPM werden automatisch über <a href="https://getsongbpm.com/api" target="_blank" rel="noopener">GetSongBPM</a> gesucht, ein Key ist schon eingebaut. Ein eigener Key ist nur nötig, wenn die Suche wegen des gemeinsamen Kontingents pausiert.</p>
     <input type="password" id="gsb" placeholder="Eigener GetSongBPM-Key (optional)" autocomplete="off">
+    <p><button class="link" id="gsbtestbtn" type="button">Verbindung testen</button> <span id="gsbtest" role="status"></span></p>
   </details>
   <p id="status" role="status"></p>
 
@@ -831,7 +834,7 @@ const store = {
 };
 
 const state = {
-  settings: store.get("settings", { user: "", token: "", gsb: "" }),
+  settings: store.get("settings", { user: "", token: "", gsb: "", proxy: "" }),
   collection: [],
   selected: [],               // Release-IDs in Auswahl-Reihenfolge
   onlyNew: true,
@@ -898,8 +901,9 @@ async function fetchDetails(id) {
   // Laufzeiten fehlen bei vielen Vinyl-Einträgen: erst Master-Release, dann MusicBrainz
   if (master?.tracklist) fillFrom(rec, master.tracklist.map(t => ({ title: t.title, dur: t.duration })), "dur");
   if (rec.tracks.some(t => !t.dur)) { try { await durationsFromMusicBrainz(rec); } catch {} }
+  try { await lookupKeys(rec); } catch {}
+  rec.checked = Date.now();
   setRec(id, rec);
-  if (gsbKey()) { try { await lookupKeys(rec); setRec(id, rec); } catch (e) { status(e.message, true); } }
   return rec;
 }
 
@@ -943,46 +947,72 @@ async function durationsFromMusicBrainz(rec) {
   status("");
 }
 
-/* ---- GetSongBPM (Tonart & BPM) – kostenloser API-Key nötig ---- */
+/* ---- GetSongBPM (Tonart & BPM) ---- */
+const GSB_PROXY = "";   // optional: Adresse einer Zwischenstation, falls GetSongBPM Browser-Anfragen blockiert
 let gsbLast = 0;
-async function lookupKeys(rec, force) {
-  const key = gsbKey(); if (!key) return 0;
+async function gsbSearch(lookup) {
+  const w = gsbLast + 1000 - Date.now(); if (w > 0) await new Promise(r => setTimeout(r, w));
+  gsbLast = Date.now();
+  const q = `type=both&lookup=${encodeURIComponent(lookup)}`;
+  const url = (state.settings.proxy || GSB_PROXY)
+    ? `${state.settings.proxy || GSB_PROXY}?${q}`
+    : `https://api.getsong.co/search/?api_key=${encodeURIComponent(gsbKey())}&${q}`;
+  let res;
+  try { res = await fetch(url); }
+  catch { const e = new Error("GetSongBPM blockiert Anfragen direkt aus dem Browser."); e.blocked = true; throw e; }
+  if (res.status === 401 || res.status === 403) throw new Error("GetSongBPM lehnt den API-Key ab.");
+  if (res.status === 429) throw new Error("GetSongBPM: stündliches Abfrage-Limit erreicht, später erneut versuchen.");
+  if (!res.ok) throw new Error(`GetSongBPM antwortet mit Fehler ${res.status}.`);
+  const data = await res.json().catch(() => ({}));
+  if (data.error) throw new Error("GetSongBPM: " + data.error);
+  return Array.isArray(data.search) ? data.search : [];
+}
+
+/** Füllt fehlende Tonart/BPM. Ergebnis wird als Hinweis an der Platte gespeichert. */
+async function lookupKeys(rec) {
   const artist = rec.artist.split(/ & |, | and /)[0];
-  let n = 0;
-  for (const t of rec.tracks) {
-    if (!force && toCamelot(t.key) && fixBpm(t.bpm)) continue;
-    const w = gsbLast + 1000 - Date.now(); if (w > 0) await new Promise(r => setTimeout(r, w));
-    gsbLast = Date.now();
-    status(`Suche Tonart und BPM: ${t.title} …`);
-    const lookup = `song:${normTitle(t.title)} artist:${artist}`;
-    let data;
-    try {
-      const res = await fetch(`https://api.getsong.co/search/?api_key=${encodeURIComponent(key)}&type=both&lookup=${encodeURIComponent(lookup)}`);
-      if (res.status === 401 || res.status === 403) throw new Error("GetSongBPM lehnt den API-Key ab. Ist ein eigener Key eingetragen, bitte prüfen – sonst muss der eingebaute Key erneuert werden.");
-      if (!res.ok) throw new Error(`GetSongBPM antwortet mit Fehler ${res.status}.`);
-      data = await res.json();
-    } catch (e) {
-      if (e instanceof TypeError) throw new Error("GetSongBPM ist von hier aus nicht erreichbar (vom Browser blockiert).");
-      throw e;
+  const todo = rec.tracks.filter(t => !toCamelot(t.key) || !fixBpm(t.bpm));
+  let found = 0;
+  try {
+    for (const t of todo) {
+      status(`Suche Tonart und BPM: ${t.title} …`);
+      const list = await gsbSearch(`song:${normTitle(t.title)} artist:${normTitle(artist)}`);
+      const a = normTitle(artist).split(" ")[0];
+      const hit = list.find(x => sameTitle(x.title, t.title) && normTitle(x.artist?.name).includes(a)) ||
+                  list.find(x => sameTitle(x.title, t.title));
+      if (hit) {
+        if (!toCamelot(t.key) && toCamelot(hit.key_of)) t.key = hit.key_of;
+        if (!fixBpm(t.bpm) && +hit.tempo) t.bpm = String(hit.tempo);
+        found++;
+      }
     }
-    const list = Array.isArray(data.search) ? data.search : [];
-    const a = normTitle(artist);
-    const hit = list.find(x => sameTitle(x.title, t.title) && normTitle(x.artist?.name).includes(a.split(" ")[0])) ||
-                list.find(x => sameTitle(x.title, t.title));
-    if (hit) {
-      if (!toCamelot(t.key) && toCamelot(hit.key_of)) t.key = hit.key_of;
-      if (!fixBpm(t.bpm) && +hit.tempo) t.bpm = String(hit.tempo);
-      n++;
-    }
-  }
-  status("");
-  return n;
+    rec.note = todo.length ? `Tonart/BPM: für ${found} von ${todo.length} Tracks gefunden.` : "";
+  } catch (e) {
+    rec.note = e.message; rec.noteErr = true; throw e;
+  } finally { status(""); }
+  rec.noteErr = false;
+  return found;
+}
+
+async function testConnection() {
+  const out = $("#gsbtest");
+  out.textContent = "teste …"; out.className = "";
+  try {
+    const list = await gsbSearch("song:smooth operator artist:sade");
+    const hit = list.find(x => sameTitle(x.title, "Smooth Operator"));
+    out.textContent = hit ? `Verbindung klappt: Smooth Operator = ${hit.key_of || "?"}, ${hit.tempo || "?"} BPM.` : "Verbindung klappt, aber kein Treffer für den Testsong.";
+  } catch (e) { out.textContent = e.message; out.className = "err"; }
 }
 
 let queue = Promise.resolve();
 function queueDetails(id) {
   queue = queue.then(async () => {
-    if (!state.selected.includes(id) || getRec(id)) return renderEditor();
+    if (!state.selected.includes(id)) return renderEditor();
+    const cached = getRec(id);
+    if (cached) {
+      if (!cached.checked && hasGaps(cached)) { renderEditor(); await autoFill(id); }
+      return renderEditor();
+    }
     status(`Lade Tracklist: ${labelOf(id)} …`);
     try { await fetchDetails(id); status(""); }
     catch (e) { status(`${labelOf(id)}: ${e.message}`, true); }
@@ -1055,6 +1085,7 @@ function renderEditor() {
           ${gaps ? `<button class="link" data-lookup="${id}">Lücken suchen</button>` : ""}
           <button class="link" data-remove="${id}">entfernen</button>
           <button class="link" data-reload="${id}" title="Discogs-Daten neu laden, eigene Eingaben gehen verloren">neu laden</button></div>
+        ${r.note ? `<p class="${r.noteErr ? "warn" : "note"}">${esc(r.note)}</p>` : ""}
         ${over.length ? `<p class="warn">Das Layout fasst 5 Tracks pro Seite (${esc(over.join(", "))}). Überzählige Tracks werden nicht gedruckt.</p>` : ""}
       </header>
       <table>
@@ -1088,16 +1119,22 @@ function onEditorInput(e) {
   setRec(id, r);
 }
 
+const hasGaps = r => r.tracks.some(t => !t.dur || !toCamelot(t.key) || !fixBpm(t.bpm));
+async function autoFill(id) {
+  const rec = getRec(id); if (!rec) return;
+  try { if (rec.tracks.some(t => !t.dur)) await durationsFromMusicBrainz(rec); } catch {}
+  try { await lookupKeys(rec); } catch {}
+  rec.checked = Date.now(); setRec(id, rec);
+}
+
 async function fillGaps(id, btn) {
   const rec = getRec(id); if (!rec) return;
   btn.disabled = true; btn.textContent = "suche …";
-  try {
-    if (rec.tracks.some(t => !t.dur)) await durationsFromMusicBrainz(rec);
-    await lookupKeys(rec);
-    setRec(id, rec);
-    const left = rec.tracks.filter(t => !t.dur || !toCamelot(t.key) || !fixBpm(t.bpm)).length;
-    toast(left ? `${left} Tracks haben noch Lücken – bitte von Hand ergänzen.` : "Alle Werte gefunden.", !!left);
-  } catch (e) { toast(e.message, true); }
+  await autoFill(id);
+  const r = getRec(id);
+  const left = r.tracks.filter(t => !t.dur || !toCamelot(t.key) || !fixBpm(t.bpm)).length;
+  if (r.noteErr) toast(r.note, true);
+  else toast(left ? `${left} Tracks haben noch Lücken – bitte von Hand ergänzen.` : "Alle Werte gefunden.", !!left);
   renderEditor();
 }
 
@@ -1158,10 +1195,11 @@ function init() {
   $("#user").value = state.settings.user || "AlessandroAlemore";
   $("#token").value = state.settings.token || "";
   $("#gsb").value = state.settings.gsb || "";
-  const saveSettings = () => { state.settings = { user: $("#user").value.trim(), token: $("#token").value.trim(), gsb: $("#gsb").value.trim() }; store.set("settings", state.settings); };
+  const saveSettings = () => { state.settings = { user: $("#user").value.trim(), token: $("#token").value.trim(), gsb: $("#gsb").value.trim(), proxy: state.settings.proxy || "" }; store.set("settings", state.settings); };
   $("#user").addEventListener("change", () => { saveSettings(); state.collection = []; state.selected = []; renderList(); renderEditor(); });
   $("#token").addEventListener("change", saveSettings);
   $("#gsb").addEventListener("change", saveSettings);
+  $("#gsbtestbtn").addEventListener("click", testConnection);
   $("#connect").addEventListener("submit", e => { e.preventDefault(); saveSettings(); loadCollection(); });
   $("#onlynew").addEventListener("change", e => { state.onlyNew = e.target.checked; renderList(); });
   $("#search").addEventListener("input", renderList);
